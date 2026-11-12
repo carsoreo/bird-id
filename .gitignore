@@ -1,0 +1,7 @@
+.venv/
+.crops/
+*.pt
+ebird_key.txt
+species-*.json
+__pycache__/
+*.json

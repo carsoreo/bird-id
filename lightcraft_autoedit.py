@@ -11,12 +11,15 @@ edge-masked sharpening. Artistic choice is shown as a colour label + keyword:
   green "Fill frame"     bird is big enough to be the whole picture (fills ~60% of the crop)
   blue  "Environmental"  small bird, keep habitat around it (bird ~25% of the crop)
   red   "No bird found"  left uncropped for you to judge
+  purple "Check bird"    low-confidence detection: cropped, but may not be a bird (keyword still says fill/environmental)
 """
 import argparse, json, subprocess, sys, tempfile
 from pathlib import Path
 
 CLI = r"C:\Program Files\ArtCraft\LightCraft\lightcraft-cli.exe"
-LABELS = {"fill": ("green", "Fill frame"), "scene": ("blue", "Environmental"), "none": ("red", "No bird found")}
+LABELS = {"fill": ("green", "Fill frame"), "scene": ("blue", "Environmental"), "none": ("red", "No bird found"),
+          "check": ("purple", "Check bird")}
+CHECK_BELOW = 0.5  # best detection under this confidence: keep the crop, but label it for a human look
 MIN_CROP = 0.30   # never keep less than 30% of the frame's width/height (≈3 MP on a 32 MP R7)
 FILL_AT = 0.12    # bird's long side ≥ 12% of the frame → fill-frame crop
 
@@ -78,7 +81,7 @@ def main():
         pid, iso = p["id"], p["meta"].get("iso") or 100
         style, rect, mag = plan_crop(e)
         dn = denoise_amount(iso, mag)
-        color, name = LABELS[style]
+        color, name = LABELS["check" if e["birds"] and e["birds"][0]["conf"] < CHECK_BELOW else style]
         cmds += [
             {"command": "library.select", "params": {"ids": [pid], "active": pid}},
             {"command": "develop.auto", "params": {}},
@@ -90,7 +93,7 @@ def main():
                 "detail.sharpenDetail": 25, "detail.sharpenMasking": 60}}},
             {"command": "photo.label", "params": {"label": color, "ids": [pid]}},
             {"command": "photo.setMeta", "params": {"ids": [pid],
-                "removeKeywords": [n for _, n in LABELS.values()], "addKeywords": [name]}},
+                "removeKeywords": [n for _, n in LABELS.values()], "addKeywords": sorted({name, LABELS[style][1]})}},
         ]
         report.append(f"{pid:4} {p['file_name']:14} ISO{iso:<6} {style:5} x{mag:4.1f} denoise {dn:2}  {rect}")
     print("\n".join(report))

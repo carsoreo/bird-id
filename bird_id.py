@@ -6,6 +6,9 @@ Usage:
 --region needs an eBird API key in ebird_key.txt (get one at https://ebird.org/api/keygen);
 it limits species to the region's eBird checklist. Without it BioCLIP picks from the whole tree of life.
 Output JSON: one entry per image with each bird's normalized box [x0,y0,x1,y1], confidence and top species.
+No bird? A dark frame is brightened and searched again ("boost_ev" records how much); if there's still
+none, "subject" holds the most confident other object or the sharpest area, to crop on instead.
+"dark_ev" is how many stops the frame would need to reach a mid-grey average (0 = bright enough).
 """
 import argparse, json, sys, urllib.request
 from pathlib import Path
@@ -40,6 +43,34 @@ def region_labels(region):
     return json.loads(cache.read_text())
 
 
+def boost(img):
+    """Brighten a dark frame so its mean luminance is ~0.4 (at most +3 EV), lifting shadows most.
+    → (image, EV applied)."""
+    import math
+    import numpy as np
+    from PIL import Image
+    x = np.asarray(img, dtype=np.float32) / 255
+    lin = x ** 2.2
+    mean = float((lin @ [0.2126, 0.7152, 0.0722]).mean())
+    ev = min(3.0, max(0.0, math.log2(0.4 ** 2.2 / max(mean, 1e-4))))
+    out = (np.clip(lin * 2 ** ev, 0, 1) ** (1 / 2.2)) ** 0.8  # extra gamma lifts the shadows
+    return Image.fromarray((out * 255).astype(np.uint8)), round(ev, 1)
+
+
+def sharpest_box(img, frac=0.3):
+    """Normalized box (frac of each side) centred on the frame's sharpest detail."""
+    import numpy as np
+    g = np.asarray(img.convert("L").resize((256, max(1, 256 * img.height // img.width))), dtype=np.float32)
+    e = np.abs(np.diff(g, axis=0))[:, :-1] + np.abs(np.diff(g, axis=1))[:-1, :]
+    k = 25  # box-filter the edge energy so one bright twig doesn't win
+    c = np.pad(e, k // 2, mode="edge").cumsum(0).cumsum(1)
+    s = c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]
+    y, x = np.unravel_index(s.argmax(), s.shape)
+    cx, cy = (x + 0.5) / s.shape[1], (y + 0.5) / s.shape[0]
+    x0 = min(max(cx - frac / 2, 0), 1 - frac); y0 = min(max(cy - frac / 2, 0), 1 - frac)
+    return [round(x0, 4), round(y0, 4), round(x0 + frac, 4), round(y0 + frac, 4)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", nargs="+")
@@ -48,6 +79,7 @@ def main():
     ap.add_argument("--imgsz", type=int, default=1600, help="detector input size; bigger finds smaller birds, slower")
     ap.add_argument("--conf", type=float, default=0.2)
     ap.add_argument("--top", type=int, default=3)
+    ap.add_argument("--no-boost", action="store_true", help="don't re-check dark frames brightened")
     a = ap.parse_args()
 
     from PIL import Image
@@ -65,15 +97,14 @@ def main():
     crops_dir.mkdir(exist_ok=True)
     results = []
     files = list(images(a.inputs))
-    for i, f in enumerate(files, 1):
-        img = Image.open(f).convert("RGB")
+    def find_birds(img, stem):
         W, H = img.size
         r = det.predict(img, imgsz=a.imgsz, conf=a.conf, classes=[BIRD], verbose=False)[0]
         birds = []
         for (x0, y0, x1, y1), c in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist()):
             # pad the box 15% so BioCLIP sees the whole bird
             px, py = (x1 - x0) * 0.15, (y1 - y0) * 0.15
-            crop = crops_dir / f"{f.stem}_{len(birds)}.jpg"
+            crop = crops_dir / f"{stem}_{len(birds)}.jpg"
             img.crop((max(0, x0 - px), max(0, y0 - py), min(W, x1 + px), min(H, y1 + py))).save(crop, quality=92)
             preds = name([str(crop)])
             birds.append({
@@ -82,10 +113,38 @@ def main():
                 "species": [{"name": p.get("classification") or f"{p.get('common_name')} ({p.get('species')})",
                              "score": round(p["score"], 3)} for p in preds],
             })
-        birds.sort(key=lambda b: -b["conf"])
-        results.append({"file": str(f), "width": W, "height": H, "birds": birds})
-        top = birds[0]["species"][0]["name"] if birds else "-"
-        print(f"[{i}/{len(files)}] {f.name}: {len(birds)} bird(s) {top}", flush=True)
+        return sorted(birds, key=lambda b: -b["conf"])
+
+    def other_subject(img):
+        """No bird: the most confident other object, else the sharpest area (where the camera focused)."""
+        W, H = img.size
+        r = det.predict(img, imgsz=a.imgsz, conf=0.3, verbose=False)[0]
+        if len(r.boxes):
+            k = int(r.boxes.conf.argmax())
+            x0, y0, x1, y1 = r.boxes.xyxy[k].tolist()
+            return {"kind": r.names[int(r.boxes.cls[k])], "conf": round(float(r.boxes.conf[k]), 3),
+                    "box": [round(x0 / W, 4), round(y0 / H, 4), round(x1 / W, 4), round(y1 / H, 4)]}
+        return {"kind": "sharpest area", "conf": None, "box": sharpest_box(img)}
+
+    results = []
+    files = list(images(a.inputs))
+    for i, f in enumerate(files, 1):
+        img = Image.open(f).convert("RGB")
+        W, H = img.size
+        bright, ev = boost(img)
+        entry = {"file": str(f), "width": W, "height": H, "dark_ev": ev, "birds": find_birds(img, f.stem)}
+        if not entry["birds"] and not a.no_boost:
+            if ev >= 0.5:  # only worth a second look when the frame is actually dark
+                entry["birds"] = find_birds(bright, f.stem)
+                if entry["birds"]:
+                    entry["boost_ev"] = ev
+        if not entry["birds"]:
+            entry["subject"] = other_subject(img)
+        results.append(entry)
+        b = entry["birds"]
+        what = b[0]["species"][0]["name"] + (f" (seen at +{entry['boost_ev']} EV)" if "boost_ev" in entry else "") \
+            if b else f"no bird; subject: {entry['subject']['kind']}"
+        print(f"[{i}/{len(files)}] {f.name}: {len(b)} bird(s) {what}", flush=True)
     Path(a.out).write_text(json.dumps(results, indent=1))
     print(f"wrote {a.out}")
 

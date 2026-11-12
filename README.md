@@ -7,8 +7,10 @@ Find the birds in your photos, name the species, and auto-edit them in [LightCra
 - **Auto-edit** (`lightcraft_autoedit.py`): auto tone, a crop around the bird, BM3D denoise scaled by ISO and crop size, feather texture, and edge-masked sharpening. It also makes an artistic call per photo, shown as a LightCraft colour label:
   - 🟩 **Fill frame**: the bird is big enough to carry the picture, so it fills about 60% of the crop
   - 🟦 **Environmental**: the bird is small, so the crop keeps the habitat (bird at about 25% of the crop)
-  - 🟥 **No bird found**: left uncropped for you to judge
   - 🟪 **Check bird**: low-confidence detection (under 0.5). It's cropped, but may be a leaf or branch
+  - 🟨 **Other subject**: no bird, so it's still edited and recomposed around the most confident other object (a car, a stump…) or the sharpest area of the frame
+  - 🟥 **No bird found**: only for results from older runs that have no subject
+- **Dark frames**: when nothing is found, a dark frame is brightened (up to +3 EV) and searched again. A bird found that way gets up to +1.5 EV in the edit, and any very dark frame gets up to +1 EV on top of auto tone.
 
 ## Setup (Windows)
 

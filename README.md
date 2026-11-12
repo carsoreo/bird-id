@@ -5,9 +5,10 @@ Find the birds in your photos, name the species, and auto-edit them in [LightCra
 - **Detection**: [Ultralytics YOLO26x](https://docs.ultralytics.com/) (COCO class `bird`), so it finds small birds in busy scenes.
 - **Species ID**: [BioCLIP](https://imageomics.github.io/bioclip/) (`pybioclip`), either over the whole tree of life or limited to an **eBird regional checklist** (`--region US-NC`).
 - **Auto-edit** (`lightcraft_autoedit.py`): auto tone, a crop around the bird, BM3D denoise scaled by ISO and crop size, feather texture, and edge-masked sharpening. It also makes an artistic call per photo, shown as a LightCraft colour label:
-  - ðŸŸ© **Fill frame**: the bird is big enough to carry the picture, so it fills about 60% of the crop
-  - ðŸŸ¦ **Environmental**: the bird is small, so the crop keeps the habitat (bird at about 25% of the crop)
-  - ðŸŸ¥ **No bird found**: left uncropped for you to judge
+  - 🟩 **Fill frame**: the bird is big enough to carry the picture, so it fills about 60% of the crop
+  - 🟦 **Environmental**: the bird is small, so the crop keeps the habitat (bird at about 25% of the crop)
+  - 🟥 **No bird found**: left uncropped for you to judge
+  - 🟪 **Check bird**: low-confidence detection (under 0.5). It's cropped, but may be a leaf or branch
 
 ## Setup (Windows)
 
@@ -27,7 +28,7 @@ Optional: get an eBird API key at <https://ebird.org/api/keygen> and save it as 
 # 1. Export uncropped JPEGs from your LightCraft library (default naming keeps the file stems)
 lightcraft-cli run --library "LIB" app.export dir=src format=jpeg longEdge=2048 "ids=[1,2,3]"
 
-# 2. Find and name the birds
+# 2. Find and name the birds (for tiny birds, rescan misses with --conf 0.08 --imgsz 2048)
 .venv\Scripts\python bird_id.py src -o birds.json --region US-NC
 
 # 3. Preview the plan, then apply it to the library (close the LightCraft app first: one writer per library)

@@ -80,15 +80,28 @@ def main():
     ap.add_argument("--conf", type=float, default=0.2)
     ap.add_argument("--top", type=int, default=3)
     ap.add_argument("--no-boost", action="store_true", help="don't re-check dark frames brightened")
+    ap.add_argument("--no-subject", action="store_true",
+                    help="skip the other-subject pass on birdless frames (only the auto-edit needs it)")
     a = ap.parse_args()
 
     from PIL import Image
     from ultralytics import YOLO
     det = YOLO(str(HERE / "yolo26x.pt"))  # load before importing bioclip, which breaks ultralytics' checkpoint loading
+    import os, torch
+    torch.set_num_threads(os.cpu_count())  # ultralytics drops torch to 1 thread, which makes BioCLIP crawl
     from bioclip import TreeOfLifeClassifier, CustomLabelsClassifier, Rank
     if a.region:
-        clf = CustomLabelsClassifier(region_labels(a.region))
-        name = lambda imgs: clf.predict(imgs, k=a.top)
+        # BioCLIP's precomputed tree-of-life embeddings, cut down to the region's species: seconds to set up,
+        # where CustomLabelsClassifier re-encodes 80 prompts per species (hours on a CPU).
+        common = {l.rsplit(" (", 1)[1].rstrip(")"): l.rsplit(" (", 1)[0] for l in region_labels(a.region)}
+        clf = TreeOfLifeClassifier()
+        clf.apply_filter(clf.get_label_data()["species"].isin(common).tolist())
+        def name(imgs):
+            out = []
+            for p in clf.predict(imgs, Rank.SPECIES, k=a.top):
+                out.append({"classification": f"{common.get(p['species'], p.get('common_name'))} ({p['species']})",
+                            "score": p["score"]})
+            return out
     else:
         clf = TreeOfLifeClassifier()
         name = lambda imgs: clf.predict(imgs, Rank.SPECIES, k=a.top)
@@ -139,7 +152,7 @@ def main():
                 if entry["birds"]:
                     entry["boost_ev"] = ev
         if not entry["birds"]:
-            entry["subject"] = other_subject(img)
+            entry["subject"] = {"kind": "skipped"} if a.no_subject else other_subject(img)
         results.append(entry)
         b = entry["birds"]
         what = b[0]["species"][0]["name"] + (f" (seen at +{entry['boost_ev']} EV)" if "boost_ev" in entry else "") \

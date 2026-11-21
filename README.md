@@ -24,7 +24,9 @@ python -m venv .venv
 
 The YOLO weights (`yolo26x.pt`, ~113 MB) and the BioCLIP model download on first run.
 
-Optional: get an eBird API key at <https://ebird.org/api/keygen> and save it as `ebird_key.txt` (git-ignored). Each region's species list is then cached in `species-<region>.json`.
+Optional: get an eBird API key at <https://ebird.org/api/keygen> and save it as `ebird_key.txt` (git-ignored). Each region's species list is then cached in `species-<region>.json`. Any `species-<name>.json` (a JSON list of `"Common Name (Scientific name)"`) works as `--region <name>` without a key. The region limits BioCLIP's precomputed tree-of-life names to those species, so setup takes seconds.
+
+Pass `--no-subject` when you only want species IDs: it skips the extra pass that finds a non-bird subject to crop on, which the auto-edit needs but plain ID doesn't (about 5 s a photo on a CPU instead of about 9).
 
 ## Use
 

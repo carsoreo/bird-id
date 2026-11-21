@@ -1,4 +1,6 @@
-﻿# bird-id
+# bird-id
+
+[![tests](https://github.com/carsoreo/bird-id/actions/workflows/test.yml/badge.svg)](https://github.com/carsoreo/bird-id/actions/workflows/test.yml)
 
 Find the birds in your photos, name the species, and auto-edit them in [LightCraft](https://github.com/storytold/lightcraft).
 
@@ -40,8 +42,16 @@ python lightcraft_autoedit.py birds.json "LIB"
 
 `birds.json` has one entry per image, with each bird's normalized box `[x0,y0,x1,y1]`, detector confidence and top-3 species with scores.
 
+## Tests
+
+`python -m unittest -v` checks the crop planner (fill vs. environmental crops, aspect ratios, staying inside the frame, ignoring weak detections) and the ISO-based noise reduction. They need no models or GPU and run on every push.
+
 ## Notes
 
 - Crops never keep less than 30% of the frame (about 3 MP on a 32 MP body). The bird is centered, because the tool doesn't know which way it faces, so you may want to nudge crops to leave room in front of it.
 - Species scores across the whole tree of life are low and can name birds from other continents. Use `--region` for real IDs.
 - Ultralytics is AGPL-3.0, and BioCLIP's weights have their own license. Check both before any commercial use.
+
+## License
+
+MIT
